@@ -1,0 +1,27 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+.Python
+*.so
+.env
+venv/
+ENV/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Archivos de prueba Excel (opcional - puedes quitar esta línea si quieres incluirlos)
+*.xlsx
+*.xls
+
+# Streamlit
+.streamlit/secrets.toml
+
