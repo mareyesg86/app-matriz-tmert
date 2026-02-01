@@ -53,6 +53,66 @@ def validar_plan_accion_general(get_cell_func, sheet_name, fila_idx, columnas_ob
     else:
         return 'sin_plan'
 
+# --- Función para Validar Identificación Inicial (Hoja 3) ---
+def validar_identificacion_inicial(get_cell_func, sheet_exists_func):
+    """
+    Valida la Hoja "3" (Identificación Inicial).
+    
+    Regla: Si las celdas C y D de una fila tienen datos (distintos de "0" y no vacías),
+    entonces las columnas E hasta K de esa fila deben contener "SI" o "NO".
+    
+    Retorna: Lista de diccionarios con casos que tienen problemas
+    """
+    alertas = []
+    
+    # Verificar si existe la hoja "3"
+    if not sheet_exists_func("3"):
+        return alertas  # Retornar lista vacía si no existe la hoja
+    
+    # Columnas a verificar: B=2, C=3, D=4, E=5, F=6, G=7, H=8, I=9, J=10, K=11
+    COL_CASO = 2      # B - Número de caso
+    COL_C = 3         # C
+    COL_D = 4         # D
+    COLS_EVALUAR = [5, 6, 7, 8, 9, 10, 11]  # E, F, G, H, I, J, K
+    
+    VALORES_VALIDOS = ["SI", "NO", "SÍ"]  # Valores aceptados (incluyendo "SÍ" con acento)
+    
+    # Recorrer filas 14 a 3013
+    for fila in range(14, 3014):
+        # Obtener valores de columnas C y D
+        valor_c = get_cell_func("3", fila, COL_C)
+        valor_d = get_cell_func("3", fila, COL_D)
+        
+        # Verificar si C o D tienen datos (distintos de "0" y no vacías)
+        tiene_datos_c = valor_c and valor_c != "0"
+        tiene_datos_d = valor_d and valor_d != "0"
+        
+        if tiene_datos_c or tiene_datos_d:
+            # Obtener número de caso
+            num_caso = get_cell_func("3", fila, COL_CASO)
+            if not num_caso:
+                num_caso = f"Fila {fila}"
+            
+            # Verificar que columnas E-K tengan "SI" o "NO"
+            columnas_incompletas = []
+            for col_idx in COLS_EVALUAR:
+                valor_col = get_cell_func("3", fila, col_idx).upper() if get_cell_func("3", fila, col_idx) else ""
+                if valor_col not in VALORES_VALIDOS:
+                    # Convertir índice a letra de columna
+                    col_letra = chr(ord('A') + col_idx - 1)
+                    columnas_incompletas.append(col_letra)
+            
+            # Si hay columnas sin completar, agregar alerta
+            if columnas_incompletas:
+                alertas.append({
+                    "caso": num_caso,
+                    "fila": fila,
+                    "columnas_faltantes": columnas_incompletas,
+                    "mensaje": f"Caso {num_caso}: Falta completar identificación inicial"
+                })
+    
+    return alertas
+
 # --- Función para Procesar Excel y Extraer Datos ---
 def procesar_excel_resumen(uploaded_excel_file):
     """
@@ -231,8 +291,18 @@ def procesar_excel_resumen(uploaded_excel_file):
             "total_trabajadores": 0
         },
         "puestos_detalle": [],
-        "resumen_factores": {}
+        "resumen_factores": {},
+        "alertas_validacion": {
+            "identificacion_inicial": []
+        }
     }
+    
+    # ===== VALIDACIÓN HOJA 3: IDENTIFICACIÓN INICIAL =====
+    try:
+        alertas_id_inicial = validar_identificacion_inicial(get_cell_value, sheet_exists)
+        resultado["alertas_validacion"]["identificacion_inicial"] = alertas_id_inicial
+    except Exception as e:
+        st.warning(f"⚠️ Error al validar identificación inicial: {e}")
 
     # ===== PROCESAMIENTO HOJA 1: INFORMACIÓN GENERAL =====
     try:
@@ -485,6 +555,36 @@ if uploaded_file:
     
     if datos:
         st.success("✅ Archivo procesado correctamente")
+        
+        # ===== SECCIÓN ALERTAS DE VALIDACIÓN =====
+        alertas_id_inicial = datos.get("alertas_validacion", {}).get("identificacion_inicial", [])
+        
+        if alertas_id_inicial:
+            st.markdown("## ⚠️ Alertas de Validación")
+            
+            with st.expander(f"🔍 Identificación Inicial Incompleta: {len(alertas_id_inicial)} caso(s)", expanded=True):
+                st.warning(f"Se encontraron **{len(alertas_id_inicial)} caso(s)** con identificación inicial incompleta en la Hoja 3.")
+                st.markdown("**Casos afectados:**")
+                
+                # Mostrar los casos en columnas para mejor visualización
+                casos_por_mostrar = alertas_id_inicial[:50]  # Limitar a 50 para no saturar
+                
+                # Crear DataFrame para mostrar
+                df_alertas = pd.DataFrame([
+                    {
+                        "Caso": alerta["caso"],
+                        "Fila": alerta["fila"],
+                        "Columnas Faltantes": ", ".join(alerta["columnas_faltantes"])
+                    }
+                    for alerta in casos_por_mostrar
+                ])
+                
+                st.dataframe(df_alertas, use_container_width=True, hide_index=True)
+                
+                if len(alertas_id_inicial) > 50:
+                    st.info(f"ℹ️ Mostrando los primeros 50 casos de {len(alertas_id_inicial)} totales.")
+            
+            st.markdown("---")
         
         # ===== SECCIÓN 1: INFORMACIÓN GENERAL =====
         st.markdown("## 📋 Información General de la Empresa")
