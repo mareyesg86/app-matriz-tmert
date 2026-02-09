@@ -436,7 +436,12 @@ def procesar_excel_resumen(uploaded_excel_file):
             "nivel_maximo": "AUSENTE",
             "puestos_criticos": [],
             "tiene_plan_accion": None,  # None = no aplica, True = completo, False = sin plan, 'incompleto'
-            "prioridad": 0  # 0=ausente, 1=aceptable, 2=intermedio, 3=crítico
+            "prioridad": 0,  # 0=ausente, 1=aceptable, 2=intermedio, 3=crítico
+            # Contadores de casos por nivel
+            "casos_critico": 0,
+            "casos_intermedio": 0,
+            "casos_aceptable": 0,
+            "casos_ausente": 0
         }
 
     # Mapeo de prioridades
@@ -579,6 +584,16 @@ def procesar_excel_resumen(uploaded_excel_file):
                     idx = mapa_nro_puesto[nro_puesto]
                     resultado["puestos_detalle"][idx]["niveles_riesgo"][agente_norm] = risk_level
                 
+                # Incrementar contador de casos por nivel
+                if risk_level == "CRÍTICO":
+                    resultado["resumen_factores"][agente]["casos_critico"] += 1
+                elif risk_level == "INTERMEDIO":
+                    resultado["resumen_factores"][agente]["casos_intermedio"] += 1
+                elif risk_level == "ACEPTABLE":
+                    resultado["resumen_factores"][agente]["casos_aceptable"] += 1
+                else:
+                    resultado["resumen_factores"][agente]["casos_ausente"] += 1
+                
                 # Actualizar nivel máximo del factor
                 prioridad_actual = prioridad_map.get(risk_level, 0)
                 prioridad_maxima = resultado["resumen_factores"][agente]["prioridad"]
@@ -655,12 +670,18 @@ if uploaded_file:
         alertas_id_inicial = datos.get("alertas_validacion", {}).get("identificacion_inicial", [])
         alertas_eval_pendientes = datos.get("alertas_validacion", {}).get("evaluaciones_pendientes", [])
         
-        # Calcular estadísticas
+        # Calcular estadísticas de CASOS (no factores)
         total_alertas = len(alertas_id_inicial) + len(alertas_eval_pendientes)
-        riesgos_criticos = [f for f, data in resumen.items() if data["nivel_maximo"] == "CRÍTICO"]
-        riesgos_intermedios = [f for f, data in resumen.items() if data["nivel_maximo"] == "INTERMEDIO"]
-        riesgos_criticos_con_plan = [f for f in riesgos_criticos if resumen[f]["tiene_plan_accion"] == True]
-        riesgos_criticos_sin_plan = [f for f in riesgos_criticos if resumen[f]["tiene_plan_accion"] == False]
+        
+        # Contar total de casos por nivel (sumando todos los factores)
+        total_casos_criticos = sum(resumen[f]["casos_critico"] for f in resumen)
+        total_casos_intermedios = sum(resumen[f]["casos_intermedio"] for f in resumen)
+        total_casos_aceptables = sum(resumen[f]["casos_aceptable"] for f in resumen)
+        
+        # Factores con nivel máximo crítico (para planes de acción)
+        factores_criticos = [f for f, data in resumen.items() if data["nivel_maximo"] == "CRÍTICO"]
+        factores_criticos_con_plan = [f for f in factores_criticos if resumen[f]["tiene_plan_accion"] == True]
+        factores_criticos_sin_plan = [f for f in factores_criticos if resumen[f]["tiene_plan_accion"] == False]
         
         # Tarjeta de resumen compacta
         col_emp, col_estado = st.columns([1, 2])
@@ -683,35 +704,51 @@ if uploaded_file:
                 st.metric(f"{color_alertas} Alertas", total_alertas)
             
             with col_b:
-                st.metric("🔴 Riesgos Críticos", len(riesgos_criticos))
+                st.metric("🔴 Casos Críticos", total_casos_criticos)
             
             with col_c:
-                st.metric("🟡 Riesgos Intermedios", len(riesgos_intermedios))
+                st.metric("🟡 Casos Intermedios", total_casos_intermedios)
             
             with col_d:
-                if len(riesgos_criticos) > 0:
-                    cumplimiento = int((len(riesgos_criticos_con_plan) / len(riesgos_criticos)) * 100)
+                if len(factores_criticos) > 0:
+                    cumplimiento = int((len(factores_criticos_con_plan) / len(factores_criticos)) * 100)
                     st.metric("📝 Planes Acción", f"{cumplimiento}%")
                 else:
                     st.metric("📝 Planes Acción", "N/A")
         
-        # Resumen rápido de factores de riesgo
-        st.markdown("### 🎯 Factores de Riesgo (Nivel Máximo)")
+        # Resumen de factores de riesgo con conteos
+        st.markdown("### 🎯 Factores de Riesgo")
         
-        factores_cols = st.columns(7)
         factores_orden = ["Repetitividad", "Postura", "MMC LDT", "MMC EA", "MMP", "Vibración MB", "Vibración CC"]
         
-        for i, factor in enumerate(factores_orden):
-            with factores_cols[i]:
-                nivel = resumen[factor]["nivel_maximo"]
-                if nivel == "CRÍTICO":
-                    st.error(f"**{factor[:6]}.**\n🔴 CRÍTICO")
-                elif nivel == "INTERMEDIO":
-                    st.warning(f"**{factor[:6]}.**\n🟡 INTERM.")
-                elif nivel == "ACEPTABLE":
-                    st.success(f"**{factor[:6]}.**\n🟢 ACEPT.")
-                else:
-                    st.info(f"**{factor[:6]}.**\n⚪ AUSENTE")
+        # Crear tabla de resumen por factor
+        tabla_factores = []
+        for factor in factores_orden:
+            data = resumen[factor]
+            tabla_factores.append({
+                "Factor": factor,
+                "🔴 Crítico": data["casos_critico"],
+                "🟡 Intermedio": data["casos_intermedio"],
+                "🟢 Aceptable": data["casos_aceptable"],
+                "Nivel Máximo": data["nivel_maximo"]
+            })
+        
+        df_factores = pd.DataFrame(tabla_factores)
+        
+        # Función para colorear según nivel máximo
+        def colorear_nivel_maximo(row):
+            nivel = row["Nivel Máximo"]
+            if nivel == "CRÍTICO":
+                return ['background-color: #ffcccc'] * len(row)
+            elif nivel == "INTERMEDIO":
+                return ['background-color: #fff3cd'] * len(row)
+            elif nivel == "ACEPTABLE":
+                return ['background-color: #d4edda'] * len(row)
+            else:
+                return ['background-color: #f8f9fa'] * len(row)
+        
+        df_styled = df_factores.style.apply(colorear_nivel_maximo, axis=1)
+        st.dataframe(df_styled, use_container_width=True, hide_index=True)
         
         st.markdown("---")
         
@@ -830,9 +867,9 @@ if uploaded_file:
         )
         
         # ===== ALERTAS =====
-        if riesgos_criticos_sin_plan:
+        if factores_criticos_sin_plan:
             st.markdown("### ⚠️ Alertas Críticas")
-            for factor in riesgos_criticos_sin_plan:
+            for factor in factores_criticos_sin_plan:
                 st.error(f"**{factor}** tiene riesgo CRÍTICO sin plan de acción registrado")
                 # Mostrar puestos afectados
                 puestos = resumen[factor]["puestos_criticos"]
@@ -840,8 +877,8 @@ if uploaded_file:
                     for puesto in puestos:
                         st.write(f"• {puesto}")
         
-        if len(riesgos_criticos) > 0:
-            porcentaje_cumplimiento = (len(riesgos_criticos_con_plan) / len(riesgos_criticos)) * 100
+        if len(factores_criticos) > 0:
+            porcentaje_cumplimiento = (len(factores_criticos_con_plan) / len(factores_criticos)) * 100
             st.markdown(f"### 📊 Cumplimiento de Planes de Acción: **{porcentaje_cumplimiento:.0f}%**")
             st.progress(porcentaje_cumplimiento / 100)
         
