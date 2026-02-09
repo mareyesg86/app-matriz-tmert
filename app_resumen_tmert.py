@@ -113,6 +113,89 @@ def validar_identificacion_inicial(get_cell_func, sheet_exists_func):
     
     return alertas
 
+# --- Función para Validar Cruzada Hoja 3 vs Hojas de Factores ---
+def validar_evaluaciones_pendientes(get_cell_func, sheet_exists_func):
+    """
+    Valida que si en Hoja 3 se marcó "SI" para un factor de riesgo,
+    entonces debe existir una evaluación en la hoja correspondiente.
+    
+    Mapeo:
+    - Columna E (Repetitividad) → Hoja 4
+    - Columna F (Postura) → Hoja 5
+    - Columna G (MMC LDT) → Hoja 6
+    - Columna H (MMC EA) → Hoja 7
+    - Columna I (MMP) → Hoja 8
+    - Columna J (Vibración CC) → Hoja 10
+    - Columna K (Vibración MB) → Hoja 9
+    
+    Retorna: Lista de diccionarios con evaluaciones pendientes
+    """
+    alertas = []
+    
+    # Verificar si existe la hoja "3"
+    if not sheet_exists_func("3"):
+        return alertas
+    
+    # Mapeo de columnas de Hoja 3 a hojas de factores
+    MAPEO_FACTORES = {
+        5: {"factor": "Repetitividad", "hoja": "4", "rango_filas": (14, 116)},      # E
+        6: {"factor": "Postura", "hoja": "5", "rango_filas": (17, 116)},            # F
+        7: {"factor": "MMC LDT", "hoja": "6", "rango_filas": (18, 118)},            # G
+        8: {"factor": "MMC EA", "hoja": "7", "rango_filas": (17, 117)},             # H
+        9: {"factor": "MMP", "hoja": "8", "rango_filas": (17, 117)},                # I
+        10: {"factor": "Vibración CC", "hoja": "10", "rango_filas": (16, 116)},     # J
+        11: {"factor": "Vibración MB", "hoja": "9", "rango_filas": (16, 116)}       # K
+    }
+    
+    COL_CASO_H3 = 2  # Columna B en Hoja 3
+    COL_NRO_FACTOR = 2  # Columna B en hojas de factores
+    
+    # Construir diccionario de casos evaluados por cada hoja de factor
+    casos_evaluados_por_hoja = {}
+    for col_idx, config in MAPEO_FACTORES.items():
+        hoja_factor = config["hoja"]
+        if not sheet_exists_func(hoja_factor):
+            casos_evaluados_por_hoja[hoja_factor] = set()
+            continue
+        
+        casos_en_hoja = set()
+        rango_inicio, rango_fin = config["rango_filas"]
+        for fila in range(rango_inicio, rango_fin):
+            nro_caso = get_cell_func(hoja_factor, fila, COL_NRO_FACTOR)
+            if nro_caso and nro_caso != "0":
+                casos_en_hoja.add(str(nro_caso).strip())
+        casos_evaluados_por_hoja[hoja_factor] = casos_en_hoja
+    
+    # Recorrer Hoja 3 y verificar evaluaciones pendientes
+    for fila in range(14, 3014):
+        # Obtener número de caso
+        num_caso = get_cell_func("3", fila, COL_CASO_H3)
+        if not num_caso or num_caso == "0":
+            continue
+        
+        num_caso_str = str(num_caso).strip()
+        
+        # Verificar cada factor
+        for col_idx, config in MAPEO_FACTORES.items():
+            valor_identificacion = get_cell_func("3", fila, col_idx)
+            valor_upper = valor_identificacion.upper() if valor_identificacion else ""
+            
+            # Si está marcado como "SI", verificar que exista evaluación
+            if valor_upper in ["SI", "SÍ"]:
+                hoja_factor = config["hoja"]
+                casos_evaluados = casos_evaluados_por_hoja.get(hoja_factor, set())
+                
+                if num_caso_str not in casos_evaluados:
+                    alertas.append({
+                        "caso": num_caso_str,
+                        "fila": fila,
+                        "factor": config["factor"],
+                        "hoja": hoja_factor,
+                        "mensaje": f"Caso {num_caso_str}: Marcado SI en {config['factor']} pero sin evaluación en Hoja {hoja_factor}"
+                    })
+    
+    return alertas
+
 # --- Función para Procesar Excel y Extraer Datos ---
 def procesar_excel_resumen(uploaded_excel_file):
     """
@@ -293,7 +376,8 @@ def procesar_excel_resumen(uploaded_excel_file):
         "puestos_detalle": [],
         "resumen_factores": {},
         "alertas_validacion": {
-            "identificacion_inicial": []
+            "identificacion_inicial": [],
+            "evaluaciones_pendientes": []
         }
     }
     
@@ -303,6 +387,13 @@ def procesar_excel_resumen(uploaded_excel_file):
         resultado["alertas_validacion"]["identificacion_inicial"] = alertas_id_inicial
     except Exception as e:
         st.warning(f"⚠️ Error al validar identificación inicial: {e}")
+    
+    # ===== VALIDACIÓN CRUZADA: HOJA 3 vs HOJAS DE FACTORES =====
+    try:
+        alertas_eval_pendientes = validar_evaluaciones_pendientes(get_cell_value, sheet_exists)
+        resultado["alertas_validacion"]["evaluaciones_pendientes"] = alertas_eval_pendientes
+    except Exception as e:
+        st.warning(f"⚠️ Error al validar evaluaciones pendientes: {e}")
 
     # ===== PROCESAMIENTO HOJA 1: INFORMACIÓN GENERAL =====
     try:
@@ -556,86 +647,128 @@ if uploaded_file:
     if datos:
         st.success("✅ Archivo procesado correctamente")
         
-        # ===== SECCIÓN ALERTAS DE VALIDACIÓN =====
-        alertas_id_inicial = datos.get("alertas_validacion", {}).get("identificacion_inicial", [])
-        
-        if alertas_id_inicial:
-            st.markdown("## ⚠️ Alertas de Validación")
-            
-            with st.expander(f"🔍 Identificación Inicial Incompleta: {len(alertas_id_inicial)} caso(s)", expanded=True):
-                st.warning(f"Se encontraron **{len(alertas_id_inicial)} caso(s)** con identificación inicial incompleta en la Hoja 3.")
-                st.markdown("**Casos afectados:**")
-                
-                # Mostrar los casos en columnas para mejor visualización
-                casos_por_mostrar = alertas_id_inicial[:50]  # Limitar a 50 para no saturar
-                
-                # Crear DataFrame para mostrar
-                df_alertas = pd.DataFrame([
-                    {
-                        "Caso": alerta["caso"],
-                        "Fila": alerta["fila"],
-                        "Columnas Faltantes": ", ".join(alerta["columnas_faltantes"])
-                    }
-                    for alerta in casos_por_mostrar
-                ])
-                
-                st.dataframe(df_alertas, use_container_width=True, hide_index=True)
-                
-                if len(alertas_id_inicial) > 50:
-                    st.info(f"ℹ️ Mostrando los primeros 50 casos de {len(alertas_id_inicial)} totales.")
-            
-            st.markdown("---")
-        
-        # ===== SECCIÓN 1: INFORMACIÓN GENERAL =====
-        st.markdown("## 📋 Información General de la Empresa")
+        # ===== RESUMEN EJECUTIVO SIMPLIFICADO =====
+        st.markdown("## 📊 Resumen Ejecutivo")
         
         info = datos["informacion_general"]
-        
-        col1, col2 = st.columns(2)
-        
-        with col1:
-            st.markdown("### 🏢 Antecedentes")
-            st.markdown(f"**Razón Social:** {info['razon_social']}")
-            st.markdown(f"**RUT:** {info['rut_empresa']}")
-            st.markdown(f"**Actividad Económica:** {info['actividad_economica']}")
-        
-        with col2:
-            st.markdown("### 📍 Centro de Trabajo")
-            st.markdown(f"**Nombre:** {info['nombre_centro_trabajo']}")
-            st.markdown(f"**Dirección:** {info['direccion_ct']}")
-            st.markdown(f"**Comuna:** {info['comuna_ct']}")
-        
-        # Métricas de trabajadores
-        col_m1, col_m2, col_m3 = st.columns(3)
-        with col_m1:
-            st.metric("👥 Total Trabajadores", info['total_trabajadores'])
-        with col_m2:
-            st.metric("👨 Hombres", info['total_trabajadores_hombres'])
-        with col_m3:
-            st.metric("👩 Mujeres", info['total_trabajadores_mujeres'])
-        
-        st.markdown("---")
-        
-        # ===== SECCIÓN 2: RESUMEN DE RIESGOS =====
-        st.markdown("## 🎯 Niveles de Riesgo Máximos por Factor")
-        
         resumen = datos["resumen_factores"]
+        alertas_id_inicial = datos.get("alertas_validacion", {}).get("identificacion_inicial", [])
+        alertas_eval_pendientes = datos.get("alertas_validacion", {}).get("evaluaciones_pendientes", [])
         
-        # Contar riesgos críticos
+        # Calcular estadísticas
+        total_alertas = len(alertas_id_inicial) + len(alertas_eval_pendientes)
         riesgos_criticos = [f for f, data in resumen.items() if data["nivel_maximo"] == "CRÍTICO"]
+        riesgos_intermedios = [f for f, data in resumen.items() if data["nivel_maximo"] == "INTERMEDIO"]
         riesgos_criticos_con_plan = [f for f in riesgos_criticos if resumen[f]["tiene_plan_accion"] == True]
         riesgos_criticos_sin_plan = [f for f in riesgos_criticos if resumen[f]["tiene_plan_accion"] == False]
         
-        # Métricas generales
-        col_r1, col_r2, col_r3 = st.columns(3)
-        with col_r1:
-            st.metric("🔴 Riesgos Críticos", len(riesgos_criticos))
-        with col_r2:
-            st.metric("✅ Con Plan de Acción", len(riesgos_criticos_con_plan))
-        with col_r3:
-            st.metric("⚠️ Sin Plan de Acción", len(riesgos_criticos_sin_plan))
+        # Tarjeta de resumen compacta
+        col_emp, col_estado = st.columns([1, 2])
         
-        st.markdown("### Tabla Resumen")
+        with col_emp:
+            st.markdown("### 🏢 Empresa")
+            st.markdown(f"**{info['razon_social']}**")
+            st.markdown(f"RUT: {info['rut_empresa']}")
+            st.markdown(f"CT: {info['nombre_centro_trabajo']}")
+            st.markdown(f"Trabajadores: **{info['total_trabajadores']}**")
+        
+        with col_estado:
+            st.markdown("### 📋 Estado de la Revisión")
+            
+            # Indicadores en una fila
+            col_a, col_b, col_c, col_d = st.columns(4)
+            
+            with col_a:
+                color_alertas = "🔴" if total_alertas > 0 else "🟢"
+                st.metric(f"{color_alertas} Alertas", total_alertas)
+            
+            with col_b:
+                st.metric("🔴 Riesgos Críticos", len(riesgos_criticos))
+            
+            with col_c:
+                st.metric("🟡 Riesgos Intermedios", len(riesgos_intermedios))
+            
+            with col_d:
+                if len(riesgos_criticos) > 0:
+                    cumplimiento = int((len(riesgos_criticos_con_plan) / len(riesgos_criticos)) * 100)
+                    st.metric("📝 Planes Acción", f"{cumplimiento}%")
+                else:
+                    st.metric("📝 Planes Acción", "N/A")
+        
+        # Resumen rápido de factores de riesgo
+        st.markdown("### 🎯 Factores de Riesgo (Nivel Máximo)")
+        
+        factores_cols = st.columns(7)
+        factores_orden = ["Repetitividad", "Postura", "MMC LDT", "MMC EA", "MMP", "Vibración MB", "Vibración CC"]
+        
+        for i, factor in enumerate(factores_orden):
+            with factores_cols[i]:
+                nivel = resumen[factor]["nivel_maximo"]
+                if nivel == "CRÍTICO":
+                    st.error(f"**{factor[:6]}.**\n🔴 CRÍTICO")
+                elif nivel == "INTERMEDIO":
+                    st.warning(f"**{factor[:6]}.**\n🟡 INTERM.")
+                elif nivel == "ACEPTABLE":
+                    st.success(f"**{factor[:6]}.**\n🟢 ACEPT.")
+                else:
+                    st.info(f"**{factor[:6]}.**\n⚪ AUSENTE")
+        
+        st.markdown("---")
+        
+        # ===== SECCIÓN ALERTAS DE VALIDACIÓN (DETALLE) =====
+        tiene_alertas = alertas_id_inicial or alertas_eval_pendientes
+        
+        if tiene_alertas:
+            st.markdown("## ⚠️ Alertas de Validación")
+            
+            # Alerta 1: Identificación Inicial Incompleta
+            if alertas_id_inicial:
+                with st.expander(f"🔍 Identificación Inicial Incompleta: {len(alertas_id_inicial)} caso(s)", expanded=False):
+                    st.warning(f"Se encontraron **{len(alertas_id_inicial)} caso(s)** con identificación inicial incompleta en la Hoja 3.")
+                    st.markdown("**Casos afectados:**")
+                    
+                    casos_por_mostrar = alertas_id_inicial[:50]
+                    
+                    df_alertas = pd.DataFrame([
+                        {
+                            "Caso": alerta["caso"],
+                            "Fila": alerta["fila"],
+                            "Columnas Faltantes": ", ".join(alerta["columnas_faltantes"])
+                        }
+                        for alerta in casos_por_mostrar
+                    ])
+                    
+                    st.dataframe(df_alertas, use_container_width=True, hide_index=True)
+                    
+                    if len(alertas_id_inicial) > 50:
+                        st.info(f"ℹ️ Mostrando los primeros 50 casos de {len(alertas_id_inicial)} totales.")
+            
+            # Alerta 2: Evaluaciones Pendientes
+            if alertas_eval_pendientes:
+                with st.expander(f"📋 Evaluaciones Pendientes: {len(alertas_eval_pendientes)} caso(s)", expanded=False):
+                    st.warning(f"Se encontraron **{len(alertas_eval_pendientes)}** evaluaciones pendientes (marcados SI en Hoja 3 pero sin evaluación).")
+                    st.markdown("**Evaluaciones faltantes:**")
+                    
+                    casos_por_mostrar = alertas_eval_pendientes[:50]
+                    
+                    df_eval_pendientes = pd.DataFrame([
+                        {
+                            "Caso": alerta["caso"],
+                            "Factor de Riesgo": alerta["factor"],
+                            "Hoja Faltante": alerta["hoja"]
+                        }
+                        for alerta in casos_por_mostrar
+                    ])
+                    
+                    st.dataframe(df_eval_pendientes, use_container_width=True, hide_index=True)
+                    
+                    if len(alertas_eval_pendientes) > 50:
+                        st.info(f"ℹ️ Mostrando los primeros 50 casos de {len(alertas_eval_pendientes)} totales.")
+            
+            st.markdown("---")
+        
+        # ===== SECCIÓN DETALLE: TABLA DE RIESGOS =====
+        st.markdown("## 📋 Detalle de Factores de Riesgo")
         
         # Crear datos para la tabla
         tabla_data = []
@@ -714,7 +847,32 @@ if uploaded_file:
         
         st.markdown("---")
         
-        # ===== SECCIÓN 3: DETALLE POR PUESTO (OPCIONAL) =====
+        # ===== SECCIÓN: INFORMACIÓN DETALLADA DE LA EMPRESA =====
+        with st.expander("🏢 Ver Información Completa de la Empresa"):
+            col1, col2 = st.columns(2)
+            
+            with col1:
+                st.markdown("### 📋 Antecedentes de la Empresa")
+                st.markdown(f"**Razón Social:** {info['razon_social']}")
+                st.markdown(f"**RUT:** {info['rut_empresa']}")
+                st.markdown(f"**Actividad Económica:** {info['actividad_economica']}")
+            
+            with col2:
+                st.markdown("### 📍 Centro de Trabajo")
+                st.markdown(f"**Nombre:** {info['nombre_centro_trabajo']}")
+                st.markdown(f"**Dirección:** {info['direccion_ct']}")
+                st.markdown(f"**Comuna:** {info['comuna_ct']}")
+            
+            st.markdown("### 👥 Dotación")
+            col_t1, col_t2, col_t3 = st.columns(3)
+            with col_t1:
+                st.metric("Total Trabajadores", info['total_trabajadores'])
+            with col_t2:
+                st.metric("Hombres", info['total_trabajadores_hombres'])
+            with col_t3:
+                st.metric("Mujeres", info['total_trabajadores_mujeres'])
+        
+        # ===== SECCIÓN: DETALLE POR PUESTO (OPCIONAL) =====
         with st.expander("📑 Ver Detalle por Puesto de Trabajo"):
             st.markdown("### Detalle de Todos los Puestos Evaluados")
             
@@ -770,24 +928,31 @@ else:
         
         2. **Revisión automática**: La aplicación procesará automáticamente:
            - Información general de la empresa
+           - Validación de identificación inicial (Hoja 3)
+           - Validación cruzada entre Hoja 3 y hojas de evaluación
            - Niveles de riesgo por cada factor
            - Validación de planes de acción para riesgos críticos
         
-        3. **Resultados**: Verás un resumen ejecutivo con:
-           - Datos generales de la empresa y centro de trabajo
-           - Tabla con el nivel máximo de riesgo por cada factor
-           - Estado de los planes de acción (solo para riesgos críticos)
-           - Alertas de riesgos críticos sin plan de acción
-           - Detalle opcional por puesto de trabajo
+        3. **Resultados**: Verás:
+           - **Resumen Ejecutivo**: Datos de empresa y estado general
+           - **Alertas de Validación**: Problemas encontrados en la matriz
+           - **Tabla de Riesgos**: Nivel máximo por factor con colores
+           - **Cumplimiento**: Porcentaje de planes de acción registrados
+           - **Detalles**: Información expandible por puesto
+        
+        ### Validaciones que realiza:
+        - ✅ Identificación inicial completa (SI/NO en columnas E-K de Hoja 3)
+        - ✅ Evaluaciones pendientes (SI en Hoja 3 pero sin evaluación en hoja correspondiente)
+        - ✅ Planes de acción para riesgos críticos
         
         ### Factores de Riesgo Evaluados:
-        - Repetitividad
-        - Postura
-        - MMC LDT (Manejo Manual de Cargas - Levantamiento y Descenso)
-        - MMC EA (Manejo Manual de Cargas - Empuje y Arrastre)
-        - MMP (Manejo Manual de Pacientes)
-        - Vibración MB (Mano-Brazo)
-        - Vibración CC (Cuerpo Completo)
+        - Repetitividad (Hoja 4)
+        - Postura (Hoja 5)
+        - MMC LDT - Levantamiento y Descenso (Hoja 6)
+        - MMC EA - Empuje y Arrastre (Hoja 7)
+        - MMP - Manejo Manual de Pacientes (Hoja 8)
+        - Vibración MB - Mano-Brazo (Hoja 9)
+        - Vibración CC - Cuerpo Completo (Hoja 10)
         
         ### Niveles de Riesgo:
         - 🔴 **CRÍTICO**: Requiere acción inmediata y plan de acción
