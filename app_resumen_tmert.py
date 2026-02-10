@@ -220,8 +220,9 @@ def validar_formulas_borradas(get_cell_func, sheet_exists_func, get_formula_func
     """
     Valida que las celdas de la columna C en las hojas de factores tengan fórmulas.
     
-    Si una celda NO tiene fórmula (fue borrada), genera una alerta.
-    Esto se cruza con Hoja 3: solo alerta si el caso tiene "SI" en el factor correspondiente.
+    Detecta CUALQUIER fila donde:
+    - La columna B tiene un número de caso (no vacío, no "0")
+    - La columna C NO tiene fórmula (fue borrada)
     
     Retorna: Lista de diccionarios con fórmulas borradas detectadas
     """
@@ -231,75 +232,47 @@ def validar_formulas_borradas(get_cell_func, sheet_exists_func, get_formula_func
     if get_formula_func is None:
         return alertas
     
-    if not sheet_exists_func("3"):
-        return alertas
-    
-    # Mapeo de columnas de Hoja 3 a hojas de factores
-    MAPEO_FACTORES = {
-        5: {"factor": "Repetitividad", "hoja": "4", "rango_filas": (16, 116)},      # E
-        6: {"factor": "Postura", "hoja": "5", "rango_filas": (17, 116)},            # F
-        7: {"factor": "MMC LDT", "hoja": "6", "rango_filas": (18, 118)},            # G
-        8: {"factor": "MMC EA", "hoja": "7", "rango_filas": (17, 117)},             # H
-        9: {"factor": "MMP", "hoja": "8", "rango_filas": (17, 117)},                # I
-        10: {"factor": "Vibración CC", "hoja": "10", "rango_filas": (16, 116)},     # J
-        11: {"factor": "Vibración MB", "hoja": "9", "rango_filas": (16, 116)}       # K
+    # Configuración de hojas de factores
+    CONFIG_HOJAS = {
+        "4": {"factor": "Repetitividad", "rango_filas": (16, 116)},
+        "5": {"factor": "Postura", "rango_filas": (17, 116)},
+        "6": {"factor": "MMC LDT", "rango_filas": (18, 118)},
+        "7": {"factor": "MMC EA", "rango_filas": (17, 117)},
+        "8": {"factor": "MMP", "rango_filas": (17, 117)},
+        "9": {"factor": "Vibración MB", "rango_filas": (16, 116)},
+        "10": {"factor": "Vibración CC", "rango_filas": (16, 116)}
     }
     
-    COL_CASO_H3 = 2      # Columna B en Hoja 3
-    COL_NRO_FACTOR = 2   # Columna B en hojas de factores
-    COL_C_FACTOR = 3     # Columna C en hojas de factores (donde debería estar la fórmula)
+    COL_NRO_CASO = 2   # Columna B - Número de caso
+    COL_C = 3          # Columna C - Debería tener fórmula
     
-    # Construir diccionario de casos y verificar si tienen fórmula en columna C
-    casos_info_por_hoja = {}
-    for col_idx, config in MAPEO_FACTORES.items():
-        hoja_factor = config["hoja"]
-        if not sheet_exists_func(hoja_factor):
-            casos_info_por_hoja[hoja_factor] = {}
+    # Recorrer cada hoja de factor y verificar fórmulas en columna C
+    for hoja_id, config in CONFIG_HOJAS.items():
+        if not sheet_exists_func(hoja_id):
             continue
         
-        casos_info = {}
         rango_inicio, rango_fin = config["rango_filas"]
-        for fila in range(rango_inicio, rango_fin):
-            nro_caso_raw = get_cell_func(hoja_factor, fila, COL_NRO_FACTOR)
-            nro_caso = normalizar_numero_caso(nro_caso_raw)
-            if nro_caso and nro_caso != "0":
-                # Verificar si la columna C tiene fórmula
-                tiene_formula = get_formula_func(hoja_factor, fila, COL_C_FACTOR)
-                casos_info[nro_caso] = {
-                    "fila": fila,
-                    "sin_formula": tiene_formula == False  # True si NO tiene fórmula
-                }
-        casos_info_por_hoja[hoja_factor] = casos_info
-    
-    # Recorrer Hoja 3 y verificar fórmulas borradas
-    for fila in range(14, 3014):
-        num_caso_raw = get_cell_func("3", fila, COL_CASO_H3)
-        num_caso = normalizar_numero_caso(num_caso_raw)
-        if not num_caso or num_caso == "0":
-            continue
         
-        # Verificar cada factor
-        for col_idx, config in MAPEO_FACTORES.items():
-            valor_identificacion = get_cell_func("3", fila, col_idx)
-            valor_upper = valor_identificacion.upper() if valor_identificacion else ""
+        for fila in range(rango_inicio, rango_fin + 1):
+            # Verificar si hay número de caso en columna B
+            nro_caso_raw = get_cell_func(hoja_id, fila, COL_NRO_CASO)
+            nro_caso = normalizar_numero_caso(nro_caso_raw)
             
-            # Si está marcado como "SI", verificar si tiene fórmula en columna C
-            if valor_upper in ["SI", "SÍ"]:
-                hoja_factor = config["hoja"]
-                casos_info = casos_info_por_hoja.get(hoja_factor, {})
-                
-                # Si el caso existe en la hoja y NO tiene fórmula en columna C
-                if num_caso in casos_info:
-                    info_caso = casos_info[num_caso]
-                    if info_caso["sin_formula"]:
-                        alertas.append({
-                            "caso": num_caso,
-                            "fila_h3": fila,
-                            "fila_factor": info_caso["fila"],
-                            "factor": config["factor"],
-                            "hoja": hoja_factor,
-                            "mensaje": f"Caso {num_caso}: Fórmula borrada en Hoja {hoja_factor} (columna C, fila {info_caso['fila']})"
-                        })
+            if not nro_caso or nro_caso == "0":
+                continue  # Fila sin caso, saltar
+            
+            # Verificar si la columna C tiene fórmula
+            tiene_formula = get_formula_func(hoja_id, fila, COL_C)
+            
+            # Si tiene_formula es False (no None), significa que NO tiene fórmula
+            if tiene_formula == False:
+                alertas.append({
+                    "caso": nro_caso,
+                    "fila_factor": fila,
+                    "factor": config["factor"],
+                    "hoja": hoja_id,
+                    "mensaje": f"Caso {nro_caso}: Fórmula borrada en Hoja {hoja_id}, columna C, fila {fila}"
+                })
     
     return alertas
 
@@ -584,6 +557,7 @@ def procesar_excel_resumen(uploaded_excel_file):
     wb_formulas = None
     try:
         wb_formulas = load_workbook(BytesIO(file_content), data_only=False)
+        st.info(f"📋 Hojas para fórmulas: {wb_formulas.sheetnames}")
     except Exception as e:
         st.warning(f"⚠️ No se pudo cargar el archivo para detectar fórmulas: {e}")
     
@@ -657,14 +631,27 @@ def procesar_excel_resumen(uploaded_excel_file):
         if wb_formulas is None:
             return None  # No se puede determinar
         try:
-            if sheet_name not in wb_formulas.sheetnames:
+            hoja = None
+            # Intentar por nombre directo
+            if sheet_name in wb_formulas.sheetnames:
+                hoja = wb_formulas[sheet_name]
+            else:
+                # Intentar por índice (si sheet_name es "4", buscar índice 4)
+                try:
+                    idx = int(sheet_name)
+                    if 0 <= idx < len(wb_formulas.sheetnames):
+                        hoja = wb_formulas.worksheets[idx]
+                except:
+                    pass
+            
+            if hoja is None:
                 return None
-            hoja = wb_formulas[sheet_name]
+                
             valor = hoja.cell(row=row, column=col).value
             if valor is None:
                 return False
             return str(valor).startswith('=')
-        except:
+        except Exception as e:
             return None
 
     resultado = {
