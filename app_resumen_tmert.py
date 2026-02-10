@@ -53,6 +53,25 @@ def validar_plan_accion_general(get_cell_func, sheet_name, fila_idx, columnas_ob
     else:
         return 'sin_plan'
 
+# --- Función auxiliar para normalizar número de caso ---
+def normalizar_numero_caso(valor):
+    """
+    Normaliza el número de caso para comparación consistente.
+    Convierte a entero si es posible, luego a string.
+    Maneja casos como "18", "18.0", " 18 ", etc.
+    """
+    if not valor:
+        return None
+    try:
+        # Intentar convertir a float primero (maneja "18.0")
+        num = float(str(valor).strip())
+        # Si es un entero, convertir sin decimales
+        if num == int(num):
+            return str(int(num))
+        return str(num)
+    except (ValueError, TypeError):
+        return str(valor).strip()
+
 # --- Función para Validar Identificación Inicial (Hoja 3) ---
 def validar_identificacion_inicial(get_cell_func, sheet_exists_func):
     """
@@ -161,19 +180,19 @@ def validar_evaluaciones_pendientes(get_cell_func, sheet_exists_func):
         casos_en_hoja = set()
         rango_inicio, rango_fin = config["rango_filas"]
         for fila in range(rango_inicio, rango_fin):
-            nro_caso = get_cell_func(hoja_factor, fila, COL_NRO_FACTOR)
+            nro_caso_raw = get_cell_func(hoja_factor, fila, COL_NRO_FACTOR)
+            nro_caso = normalizar_numero_caso(nro_caso_raw)
             if nro_caso and nro_caso != "0":
-                casos_en_hoja.add(str(nro_caso).strip())
+                casos_en_hoja.add(nro_caso)
         casos_evaluados_por_hoja[hoja_factor] = casos_en_hoja
     
     # Recorrer Hoja 3 y verificar evaluaciones pendientes
     for fila in range(14, 3014):
         # Obtener número de caso
-        num_caso = get_cell_func("3", fila, COL_CASO_H3)
-        if not num_caso or num_caso == "0":
+        num_caso_raw = get_cell_func("3", fila, COL_CASO_H3)
+        num_caso_str = normalizar_numero_caso(num_caso_raw)
+        if not num_caso_str or num_caso_str == "0":
             continue
-        
-        num_caso_str = str(num_caso).strip()
         
         # Verificar cada factor
         for col_idx, config in MAPEO_FACTORES.items():
@@ -238,10 +257,11 @@ def validar_formulas_borradas(get_cell_func, sheet_exists_func):
         casos_info = {}
         rango_inicio, rango_fin = config["rango_filas"]
         for fila in range(rango_inicio, rango_fin):
-            nro_caso = get_cell_func(hoja_factor, fila, COL_NRO_FACTOR)
+            nro_caso_raw = get_cell_func(hoja_factor, fila, COL_NRO_FACTOR)
+            nro_caso = normalizar_numero_caso(nro_caso_raw)
             if nro_caso and nro_caso != "0":
                 valor_col_c = get_cell_func(hoja_factor, fila, COL_C_FACTOR)
-                casos_info[str(nro_caso).strip()] = {
+                casos_info[nro_caso] = {
                     "fila": fila,
                     "col_c_vacia": not valor_col_c or str(valor_col_c).strip() == ""
                 }
@@ -249,11 +269,10 @@ def validar_formulas_borradas(get_cell_func, sheet_exists_func):
     
     # Recorrer Hoja 3 y verificar fórmulas borradas
     for fila in range(14, 3014):
-        num_caso = get_cell_func("3", fila, COL_CASO_H3)
+        num_caso_raw = get_cell_func("3", fila, COL_CASO_H3)
+        num_caso = normalizar_numero_caso(num_caso_raw)
         if not num_caso or num_caso == "0":
             continue
-        
-        num_caso_str = str(num_caso).strip()
         
         # Verificar cada factor
         for col_idx, config in MAPEO_FACTORES.items():
@@ -266,16 +285,16 @@ def validar_formulas_borradas(get_cell_func, sheet_exists_func):
                 casos_info = casos_info_por_hoja.get(hoja_factor, {})
                 
                 # Si el caso existe en la hoja pero columna C está vacía
-                if num_caso_str in casos_info:
-                    info_caso = casos_info[num_caso_str]
+                if num_caso in casos_info:
+                    info_caso = casos_info[num_caso]
                     if info_caso["col_c_vacia"]:
                         alertas.append({
-                            "caso": num_caso_str,
+                            "caso": num_caso,
                             "fila_h3": fila,
                             "fila_factor": info_caso["fila"],
                             "factor": config["factor"],
                             "hoja": hoja_factor,
-                            "mensaje": f"Caso {num_caso_str}: Datos del puesto incompletos en Hoja {hoja_factor} (posible fórmula borrada)"
+                            "mensaje": f"Caso {num_caso}: Datos del puesto incompletos en Hoja {hoja_factor} (posible fórmula borrada)"
                         })
     
     return alertas
@@ -372,18 +391,18 @@ def validar_identificacion_avanzada_completa(get_cell_func, sheet_exists_func):
         mapeo = {}
         rango_inicio, rango_fin = config["rango_filas"]
         for fila in range(rango_inicio, rango_fin):
-            nro_caso = get_cell_func(hoja, fila, COL_NRO_FACTOR)
+            nro_caso_raw = get_cell_func(hoja, fila, COL_NRO_FACTOR)
+            nro_caso = normalizar_numero_caso(nro_caso_raw)
             if nro_caso and nro_caso != "0":
-                mapeo[str(nro_caso).strip()] = fila
+                mapeo[nro_caso] = fila
         mapeo_caso_fila[hoja] = mapeo
     
     # Recorrer Hoja 3 y verificar evaluaciones completas
     for fila_h3 in range(14, 3014):
-        num_caso = get_cell_func("3", fila_h3, COL_CASO_H3)
-        if not num_caso or num_caso == "0":
+        num_caso_raw = get_cell_func("3", fila_h3, COL_CASO_H3)
+        num_caso_str = normalizar_numero_caso(num_caso_raw)
+        if not num_caso_str or num_caso_str == "0":
             continue
-        
-        num_caso_str = str(num_caso).strip()
         
         # Verificar cada factor
         for col_h3, config in CONFIG_EVALUACION.items():
