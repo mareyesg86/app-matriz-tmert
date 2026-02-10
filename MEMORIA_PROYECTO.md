@@ -80,7 +80,7 @@ Estos factores tienen dos niveles de evaluación:
 
 | Factor | Hoja | Col. 1ª Eval | Col. 2ª Eval | Rango Filas |
 |--------|------|-------------|-------------|-------------|
-| Repetitividad | 4 | Q (17) | X (24) | 14-116 |
+| Repetitividad | 4 | Q (17) | X (24) | 16-116 |
 | Postura | 5 | AE (31) | AW (49) | 17-116 |
 | MMC LDT | 6 | AG (33) | BD (56) | 18-118 |
 | MMC EA | 7 | X (24) | AO (41) | 17-117 |
@@ -94,6 +94,36 @@ Solo tienen un resultado: "aceptable" o "no aceptable" (equivale a crítico).
 |--------|------|----------------|-------------|
 | Vibración MB | 9 | S (19) | 16-116 |
 | Vibración CC | 10 | V (22) | 16-116 |
+
+### Flujo de Datos entre Hojas
+
+Los casos/puestos de trabajo fluyen automáticamente entre hojas mediante fórmulas de Excel:
+
+```
+Hoja 1 (Datos Base) → Hoja 2 (Lista Puestos) → Hoja 3 (Identificación Inicial)
+                                                        ↓
+                                            Si hay "SI" en columna E-K
+                                                        ↓
+                                            Hojas 4-10 (Evaluación por Factor)
+```
+
+**IMPORTANTE:** Si las fórmulas en las hojas 4-10 son borradas accidentalmente, los casos no aparecerán aunque tengan "SI" en la Hoja 3.
+
+### Fórmulas de Vinculación (Columna C, Caso 1)
+
+| Hoja | Factor | Fila Caso 1 | Fórmula Col C |
+|------|--------|-------------|---------------|
+| 4 | Repetitividad | 16 | `=Hoja1!O5` |
+| 5 | Postura | 17 | `=Hoja1!W5` |
+| 6 | MMC LDT | 18 | `=Hoja1!AE5` |
+| 7 | MMC EA | 17 | `=Hoja1!AM5` |
+| 8 | MMP | 17 | `=Hoja1!AU5` |
+| 9 | Vibración MB | 16 | `=Hoja1!BK5` |
+| 10 | Vibración CC | 16 | `=Hoja1!BC5` |
+
+**Patrón de fórmulas:** Para el caso N en la fila F:
+- Fórmula: `=Hoja1![COLUMNA][5 + N - 1]`
+- Ejemplo: Caso 2 en Hoja 4, fila 17 → `=Hoja1!O6`
 
 ---
 
@@ -245,6 +275,8 @@ streamlit run app_resumen_tmert.py
 | - | Corregido conteo de casos por nivel de riesgo |
 | - | Mostrar nombres completos de factores en tabla |
 | 10/02/2026 | Agregada validación de identificación avanzada completa |
+| 10/02/2026 | Corregida fila de inicio de Repetitividad (16 en vez de 14) |
+| 10/02/2026 | Documentado flujo de datos y fórmulas de vinculación entre hojas |
 
 ---
 

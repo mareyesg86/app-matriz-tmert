@@ -138,7 +138,7 @@ def validar_evaluaciones_pendientes(get_cell_func, sheet_exists_func):
     
     # Mapeo de columnas de Hoja 3 a hojas de factores
     MAPEO_FACTORES = {
-        5: {"factor": "Repetitividad", "hoja": "4", "rango_filas": (14, 116)},      # E
+        5: {"factor": "Repetitividad", "hoja": "4", "rango_filas": (16, 116)},      # E
         6: {"factor": "Postura", "hoja": "5", "rango_filas": (17, 116)},            # F
         7: {"factor": "MMC LDT", "hoja": "6", "rango_filas": (18, 118)},            # G
         8: {"factor": "MMC EA", "hoja": "7", "rango_filas": (17, 117)},             # H
@@ -223,7 +223,7 @@ def validar_identificacion_avanzada_completa(get_cell_func, sheet_exists_func):
             "hoja": "4",
             "col_q": 17,   # Columna Q - 1ª evaluación
             "col_x": 24,   # Columna X - 2ª evaluación
-            "rango_filas": (14, 116),
+            "rango_filas": (16, 116),
             "tipo": "dos_pasos"
         },
         6: {  # Columna F en Hoja 3
@@ -674,7 +674,7 @@ def procesar_excel_resumen(uploaded_excel_file):
             "agente": "Repetitividad",
             "col_q_idx": 17,
             "col_x_idx": 24,
-            "r_filas": (14, 116),
+            "r_filas": (16, 116),
             "columnas_plan": ["Y", "Z", "AB", "AC", "AD"]
         },
         "5": {
