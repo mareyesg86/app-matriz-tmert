@@ -158,7 +158,18 @@ Hoja 1 (Datos Base) → Hoja 2 (Lista Puestos) → Hoja 3 (Identificación Inici
 - "Caso X: [Factor] - Identificación avanzada incompleta (1ª evaluación vacía)"
 - "Caso X: [Factor] - Identificación avanzada incompleta (2ª evaluación vacía)"
 
-### 4. Validación de Planes de Acción
+### 4. Validación de Fórmulas Borradas
+
+**Función:** `validar_formulas_borradas()`
+
+**Lógica:** 
+- Si en Hoja 3 hay "SI" para un factor, y el caso existe en la hoja del factor (columna B tiene número)
+- Entonces la columna C debe tener datos (fórmula intacta)
+- Si la columna C está vacía, indica que la fórmula fue borrada
+
+**Alerta generada:** "Caso X: Datos del puesto incompletos en Hoja Y (posible fórmula borrada)"
+
+### 5. Validación de Planes de Acción
 
 **Función:** `validar_plan_accion_general()`
 
@@ -277,6 +288,7 @@ streamlit run app_resumen_tmert.py
 | 10/02/2026 | Agregada validación de identificación avanzada completa |
 | 10/02/2026 | Corregida fila de inicio de Repetitividad (16 en vez de 14) |
 | 10/02/2026 | Documentado flujo de datos y fórmulas de vinculación entre hojas |
+| 10/02/2026 | Agregada validación de fórmulas borradas (columna C vacía) |
 
 ---
 

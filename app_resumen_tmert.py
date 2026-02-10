@@ -196,6 +196,90 @@ def validar_evaluaciones_pendientes(get_cell_func, sheet_exists_func):
     
     return alertas
 
+# --- Función para Validar Fórmulas Borradas en Hojas de Factores ---
+def validar_formulas_borradas(get_cell_func, sheet_exists_func):
+    """
+    Valida que si en Hoja 3 se marcó "SI" para un factor de riesgo,
+    y el caso existe en la hoja del factor (columna B tiene número),
+    entonces la columna C debe tener datos (fórmula intacta).
+    
+    Si la columna C está vacía, indica que la fórmula fue borrada.
+    
+    Retorna: Lista de diccionarios con posibles fórmulas borradas
+    """
+    alertas = []
+    
+    if not sheet_exists_func("3"):
+        return alertas
+    
+    # Mapeo de columnas de Hoja 3 a hojas de factores
+    MAPEO_FACTORES = {
+        5: {"factor": "Repetitividad", "hoja": "4", "rango_filas": (16, 116)},      # E
+        6: {"factor": "Postura", "hoja": "5", "rango_filas": (17, 116)},            # F
+        7: {"factor": "MMC LDT", "hoja": "6", "rango_filas": (18, 118)},            # G
+        8: {"factor": "MMC EA", "hoja": "7", "rango_filas": (17, 117)},             # H
+        9: {"factor": "MMP", "hoja": "8", "rango_filas": (17, 117)},                # I
+        10: {"factor": "Vibración CC", "hoja": "10", "rango_filas": (16, 116)},     # J
+        11: {"factor": "Vibración MB", "hoja": "9", "rango_filas": (16, 116)}       # K
+    }
+    
+    COL_CASO_H3 = 2      # Columna B en Hoja 3
+    COL_NRO_FACTOR = 2   # Columna B en hojas de factores
+    COL_C_FACTOR = 3     # Columna C en hojas de factores (donde está la fórmula)
+    
+    # Construir diccionario de casos y su estado de columna C por cada hoja
+    casos_info_por_hoja = {}
+    for col_idx, config in MAPEO_FACTORES.items():
+        hoja_factor = config["hoja"]
+        if not sheet_exists_func(hoja_factor):
+            casos_info_por_hoja[hoja_factor] = {}
+            continue
+        
+        casos_info = {}
+        rango_inicio, rango_fin = config["rango_filas"]
+        for fila in range(rango_inicio, rango_fin):
+            nro_caso = get_cell_func(hoja_factor, fila, COL_NRO_FACTOR)
+            if nro_caso and nro_caso != "0":
+                valor_col_c = get_cell_func(hoja_factor, fila, COL_C_FACTOR)
+                casos_info[str(nro_caso).strip()] = {
+                    "fila": fila,
+                    "col_c_vacia": not valor_col_c or str(valor_col_c).strip() == ""
+                }
+        casos_info_por_hoja[hoja_factor] = casos_info
+    
+    # Recorrer Hoja 3 y verificar fórmulas borradas
+    for fila in range(14, 3014):
+        num_caso = get_cell_func("3", fila, COL_CASO_H3)
+        if not num_caso or num_caso == "0":
+            continue
+        
+        num_caso_str = str(num_caso).strip()
+        
+        # Verificar cada factor
+        for col_idx, config in MAPEO_FACTORES.items():
+            valor_identificacion = get_cell_func("3", fila, col_idx)
+            valor_upper = valor_identificacion.upper() if valor_identificacion else ""
+            
+            # Si está marcado como "SI", verificar columna C
+            if valor_upper in ["SI", "SÍ"]:
+                hoja_factor = config["hoja"]
+                casos_info = casos_info_por_hoja.get(hoja_factor, {})
+                
+                # Si el caso existe en la hoja pero columna C está vacía
+                if num_caso_str in casos_info:
+                    info_caso = casos_info[num_caso_str]
+                    if info_caso["col_c_vacia"]:
+                        alertas.append({
+                            "caso": num_caso_str,
+                            "fila_h3": fila,
+                            "fila_factor": info_caso["fila"],
+                            "factor": config["factor"],
+                            "hoja": hoja_factor,
+                            "mensaje": f"Caso {num_caso_str}: Datos del puesto incompletos en Hoja {hoja_factor} (posible fórmula borrada)"
+                        })
+    
+    return alertas
+
 # --- Función para Validar Identificación Avanzada Completa ---
 def validar_identificacion_avanzada_completa(get_cell_func, sheet_exists_func):
     """
@@ -572,6 +656,13 @@ def procesar_excel_resumen(uploaded_excel_file):
     except Exception as e:
         st.warning(f"⚠️ Error al validar evaluaciones pendientes: {e}")
     
+    # ===== VALIDACIÓN: FÓRMULAS BORRADAS EN HOJAS DE FACTORES =====
+    try:
+        alertas_formulas = validar_formulas_borradas(get_cell_value, sheet_exists)
+        resultado["alertas_validacion"]["formulas_borradas"] = alertas_formulas
+    except Exception as e:
+        st.warning(f"⚠️ Error al validar fórmulas borradas: {e}")
+    
     # ===== VALIDACIÓN: IDENTIFICACIÓN AVANZADA COMPLETA =====
     try:
         alertas_id_avanzada = validar_identificacion_avanzada_completa(get_cell_value, sheet_exists)
@@ -853,10 +944,11 @@ if uploaded_file:
         resumen = datos["resumen_factores"]
         alertas_id_inicial = datos.get("alertas_validacion", {}).get("identificacion_inicial", [])
         alertas_eval_pendientes = datos.get("alertas_validacion", {}).get("evaluaciones_pendientes", [])
+        alertas_formulas = datos.get("alertas_validacion", {}).get("formulas_borradas", [])
         alertas_id_avanzada = datos.get("alertas_validacion", {}).get("identificacion_avanzada_incompleta", [])
         
         # Calcular estadísticas de CASOS (no factores)
-        total_alertas = len(alertas_id_inicial) + len(alertas_eval_pendientes) + len(alertas_id_avanzada)
+        total_alertas = len(alertas_id_inicial) + len(alertas_eval_pendientes) + len(alertas_formulas) + len(alertas_id_avanzada)
         
         # Contar total de casos por nivel (sumando todos los factores)
         total_casos_criticos = sum(resumen[f]["casos_critico"] for f in resumen)
@@ -987,7 +1079,30 @@ if uploaded_file:
                     if len(alertas_eval_pendientes) > 50:
                         st.info(f"ℹ️ Mostrando los primeros 50 casos de {len(alertas_eval_pendientes)} totales.")
             
-            # Alerta 3: Identificación Avanzada Incompleta
+            # Alerta 3: Fórmulas Borradas
+            if alertas_formulas:
+                with st.expander(f"🔗 Datos del Puesto Incompletos: {len(alertas_formulas)} caso(s)", expanded=False):
+                    st.warning(f"Se encontraron **{len(alertas_formulas)}** casos con posibles fórmulas borradas.")
+                    st.markdown("**Problema:** El caso existe en la hoja de evaluación pero falta la información del puesto de trabajo (columna C vacía).")
+                    st.markdown("**Causa probable:** La fórmula que vincula los datos fue borrada accidentalmente.")
+                    
+                    casos_por_mostrar = alertas_formulas[:50]
+                    
+                    df_formulas = pd.DataFrame([
+                        {
+                            "Caso": alerta["caso"],
+                            "Factor": alerta["factor"],
+                            "Hoja": alerta["hoja"]
+                        }
+                        for alerta in casos_por_mostrar
+                    ])
+                    
+                    st.dataframe(df_formulas, use_container_width=True, hide_index=True)
+                    
+                    if len(alertas_formulas) > 50:
+                        st.info(f"ℹ️ Mostrando los primeros 50 casos de {len(alertas_formulas)} totales.")
+            
+            # Alerta 4: Identificación Avanzada Incompleta
             if alertas_id_avanzada:
                 with st.expander(f"⚠️ Identificación Avanzada Incompleta: {len(alertas_id_avanzada)} caso(s)", expanded=False):
                     st.error(f"Se encontraron **{len(alertas_id_avanzada)}** evaluaciones avanzadas incompletas o no realizadas debidamente.")
