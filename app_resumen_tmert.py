@@ -196,6 +196,182 @@ def validar_evaluaciones_pendientes(get_cell_func, sheet_exists_func):
     
     return alertas
 
+# --- Función para Validar Identificación Avanzada Completa ---
+def validar_identificacion_avanzada_completa(get_cell_func, sheet_exists_func):
+    """
+    Valida que si en Hoja 3 se marcó "SI" para un factor de riesgo,
+    entonces la evaluación avanzada debe estar COMPLETA (no vacía).
+    
+    Para factores con 2 pasos (Hojas 4-8):
+    - Columna Q (1ª evaluación) debe tener valor
+    - Si Q = "no aceptable", Columna X (2ª evaluación) también debe tener valor
+    
+    Para Vibraciones (Hojas 9-10):
+    - La columna de resultado debe tener valor
+    
+    Retorna: Lista de diccionarios con evaluaciones incompletas
+    """
+    alertas = []
+    
+    if not sheet_exists_func("3"):
+        return alertas
+    
+    # Configuración de columnas por factor
+    CONFIG_EVALUACION = {
+        5: {  # Columna E en Hoja 3
+            "factor": "Repetitividad",
+            "hoja": "4",
+            "col_q": 17,   # Columna Q - 1ª evaluación
+            "col_x": 24,   # Columna X - 2ª evaluación
+            "rango_filas": (14, 116),
+            "tipo": "dos_pasos"
+        },
+        6: {  # Columna F en Hoja 3
+            "factor": "Postura",
+            "hoja": "5",
+            "col_q": 31,   # Columna AE
+            "col_x": 49,   # Columna AW
+            "rango_filas": (17, 116),
+            "tipo": "dos_pasos"
+        },
+        7: {  # Columna G en Hoja 3
+            "factor": "MMC LDT",
+            "hoja": "6",
+            "col_q": 33,   # Columna AG
+            "col_x": 56,   # Columna BD
+            "rango_filas": (18, 118),
+            "tipo": "dos_pasos"
+        },
+        8: {  # Columna H en Hoja 3
+            "factor": "MMC EA",
+            "hoja": "7",
+            "col_q": 24,   # Columna X
+            "col_x": 41,   # Columna AO
+            "rango_filas": (17, 117),
+            "tipo": "dos_pasos"
+        },
+        9: {  # Columna I en Hoja 3
+            "factor": "MMP",
+            "hoja": "8",
+            "col_q": 25,   # Columna Y
+            "col_x": 41,   # Columna AO
+            "rango_filas": (17, 117),
+            "tipo": "dos_pasos"
+        },
+        10: {  # Columna J en Hoja 3
+            "factor": "Vibración CC",
+            "hoja": "10",
+            "col_resultado": 22,  # Columna V
+            "rango_filas": (16, 116),
+            "tipo": "directo"
+        },
+        11: {  # Columna K en Hoja 3
+            "factor": "Vibración MB",
+            "hoja": "9",
+            "col_resultado": 19,  # Columna S
+            "rango_filas": (16, 116),
+            "tipo": "directo"
+        }
+    }
+    
+    COL_CASO_H3 = 2  # Columna B en Hoja 3
+    COL_NRO_FACTOR = 2  # Columna B en hojas de factores
+    
+    # Para cada factor, construir mapeo de caso a fila en la hoja del factor
+    mapeo_caso_fila = {}
+    for col_h3, config in CONFIG_EVALUACION.items():
+        hoja = config["hoja"]
+        if not sheet_exists_func(hoja):
+            mapeo_caso_fila[hoja] = {}
+            continue
+        
+        mapeo = {}
+        rango_inicio, rango_fin = config["rango_filas"]
+        for fila in range(rango_inicio, rango_fin):
+            nro_caso = get_cell_func(hoja, fila, COL_NRO_FACTOR)
+            if nro_caso and nro_caso != "0":
+                mapeo[str(nro_caso).strip()] = fila
+        mapeo_caso_fila[hoja] = mapeo
+    
+    # Recorrer Hoja 3 y verificar evaluaciones completas
+    for fila_h3 in range(14, 3014):
+        num_caso = get_cell_func("3", fila_h3, COL_CASO_H3)
+        if not num_caso or num_caso == "0":
+            continue
+        
+        num_caso_str = str(num_caso).strip()
+        
+        # Verificar cada factor
+        for col_h3, config in CONFIG_EVALUACION.items():
+            valor_id = get_cell_func("3", fila_h3, col_h3)
+            valor_upper = valor_id.upper() if valor_id else ""
+            
+            # Solo validar si está marcado como "SI"
+            if valor_upper not in ["SI", "SÍ"]:
+                continue
+            
+            hoja = config["hoja"]
+            factor = config["factor"]
+            
+            # Buscar la fila del caso en la hoja del factor
+            fila_factor = mapeo_caso_fila.get(hoja, {}).get(num_caso_str)
+            
+            if not fila_factor:
+                # No hay registro del caso en la hoja - ya lo captura la otra validación
+                continue
+            
+            # Validar según tipo de evaluación
+            if config["tipo"] == "dos_pasos":
+                # Verificar columna Q (1ª evaluación)
+                valor_q = get_cell_func(hoja, fila_factor, config["col_q"])
+                valor_q_str = valor_q.strip().lower() if valor_q else ""
+                
+                if not valor_q_str:
+                    # Columna Q vacía - evaluación incompleta
+                    alertas.append({
+                        "caso": num_caso_str,
+                        "fila_h3": fila_h3,
+                        "fila_factor": fila_factor,
+                        "factor": factor,
+                        "hoja": hoja,
+                        "problema": "1ª evaluación vacía",
+                        "mensaje": f"Caso {num_caso_str}: {factor} - Identificación avanzada incompleta (1ª evaluación vacía en Hoja {hoja})"
+                    })
+                elif valor_q_str == "no aceptable":
+                    # Requiere 2ª evaluación - verificar columna X
+                    valor_x = get_cell_func(hoja, fila_factor, config["col_x"])
+                    valor_x_str = valor_x.strip().lower() if valor_x else ""
+                    
+                    if not valor_x_str:
+                        # Columna X vacía - evaluación incompleta
+                        alertas.append({
+                            "caso": num_caso_str,
+                            "fila_h3": fila_h3,
+                            "fila_factor": fila_factor,
+                            "factor": factor,
+                            "hoja": hoja,
+                            "problema": "2ª evaluación vacía",
+                            "mensaje": f"Caso {num_caso_str}: {factor} - Identificación avanzada incompleta (2ª evaluación vacía en Hoja {hoja})"
+                        })
+            
+            elif config["tipo"] == "directo":
+                # Verificar columna de resultado
+                valor_resultado = get_cell_func(hoja, fila_factor, config["col_resultado"])
+                valor_resultado_str = valor_resultado.strip().lower() if valor_resultado else ""
+                
+                if not valor_resultado_str:
+                    alertas.append({
+                        "caso": num_caso_str,
+                        "fila_h3": fila_h3,
+                        "fila_factor": fila_factor,
+                        "factor": factor,
+                        "hoja": hoja,
+                        "problema": "Evaluación vacía",
+                        "mensaje": f"Caso {num_caso_str}: {factor} - Identificación avanzada incompleta (resultado vacío en Hoja {hoja})"
+                    })
+    
+    return alertas
+
 # --- Función para Procesar Excel y Extraer Datos ---
 def procesar_excel_resumen(uploaded_excel_file):
     """
@@ -377,7 +553,8 @@ def procesar_excel_resumen(uploaded_excel_file):
         "resumen_factores": {},
         "alertas_validacion": {
             "identificacion_inicial": [],
-            "evaluaciones_pendientes": []
+            "evaluaciones_pendientes": [],
+            "identificacion_avanzada_incompleta": []
         }
     }
     
@@ -394,6 +571,13 @@ def procesar_excel_resumen(uploaded_excel_file):
         resultado["alertas_validacion"]["evaluaciones_pendientes"] = alertas_eval_pendientes
     except Exception as e:
         st.warning(f"⚠️ Error al validar evaluaciones pendientes: {e}")
+    
+    # ===== VALIDACIÓN: IDENTIFICACIÓN AVANZADA COMPLETA =====
+    try:
+        alertas_id_avanzada = validar_identificacion_avanzada_completa(get_cell_value, sheet_exists)
+        resultado["alertas_validacion"]["identificacion_avanzada_incompleta"] = alertas_id_avanzada
+    except Exception as e:
+        st.warning(f"⚠️ Error al validar identificación avanzada: {e}")
 
     # ===== PROCESAMIENTO HOJA 1: INFORMACIÓN GENERAL =====
     try:
@@ -669,9 +853,10 @@ if uploaded_file:
         resumen = datos["resumen_factores"]
         alertas_id_inicial = datos.get("alertas_validacion", {}).get("identificacion_inicial", [])
         alertas_eval_pendientes = datos.get("alertas_validacion", {}).get("evaluaciones_pendientes", [])
+        alertas_id_avanzada = datos.get("alertas_validacion", {}).get("identificacion_avanzada_incompleta", [])
         
         # Calcular estadísticas de CASOS (no factores)
-        total_alertas = len(alertas_id_inicial) + len(alertas_eval_pendientes)
+        total_alertas = len(alertas_id_inicial) + len(alertas_eval_pendientes) + len(alertas_id_avanzada)
         
         # Contar total de casos por nivel (sumando todos los factores)
         total_casos_criticos = sum(resumen[f]["casos_critico"] for f in resumen)
@@ -753,7 +938,7 @@ if uploaded_file:
         st.markdown("---")
         
         # ===== SECCIÓN ALERTAS DE VALIDACIÓN (DETALLE) =====
-        tiene_alertas = alertas_id_inicial or alertas_eval_pendientes
+        tiene_alertas = alertas_id_inicial or alertas_eval_pendientes or alertas_id_avanzada
         
         if tiene_alertas:
             st.markdown("## ⚠️ Alertas de Validación")
@@ -801,6 +986,31 @@ if uploaded_file:
                     
                     if len(alertas_eval_pendientes) > 50:
                         st.info(f"ℹ️ Mostrando los primeros 50 casos de {len(alertas_eval_pendientes)} totales.")
+            
+            # Alerta 3: Identificación Avanzada Incompleta
+            if alertas_id_avanzada:
+                with st.expander(f"⚠️ Identificación Avanzada Incompleta: {len(alertas_id_avanzada)} caso(s)", expanded=False):
+                    st.error(f"Se encontraron **{len(alertas_id_avanzada)}** evaluaciones avanzadas incompletas o no realizadas debidamente.")
+                    st.markdown("**Detalle:**")
+                    st.markdown("- Si la **1ª evaluación** está vacía: no se completó la evaluación inicial del factor")
+                    st.markdown("- Si la **2ª evaluación** está vacía: se requería profundizar pero no se completó")
+                    
+                    casos_por_mostrar = alertas_id_avanzada[:50]
+                    
+                    df_id_avanzada = pd.DataFrame([
+                        {
+                            "Caso": alerta["caso"],
+                            "Factor": alerta["factor"],
+                            "Hoja": alerta["hoja"],
+                            "Problema": alerta["problema"]
+                        }
+                        for alerta in casos_por_mostrar
+                    ])
+                    
+                    st.dataframe(df_id_avanzada, use_container_width=True, hide_index=True)
+                    
+                    if len(alertas_id_avanzada) > 50:
+                        st.info(f"ℹ️ Mostrando los primeros 50 casos de {len(alertas_id_avanzada)} totales.")
             
             st.markdown("---")
         
