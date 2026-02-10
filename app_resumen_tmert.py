@@ -216,17 +216,20 @@ def validar_evaluaciones_pendientes(get_cell_func, sheet_exists_func):
     return alertas
 
 # --- Función para Validar Fórmulas Borradas en Hojas de Factores ---
-def validar_formulas_borradas(get_cell_func, sheet_exists_func):
+def validar_formulas_borradas(get_cell_func, sheet_exists_func, get_formula_func=None):
     """
-    Valida que si en Hoja 3 se marcó "SI" para un factor de riesgo,
-    y el caso existe en la hoja del factor (columna B tiene número),
-    entonces la columna C debe tener datos (fórmula intacta).
+    Valida que las celdas de la columna C en las hojas de factores tengan fórmulas.
     
-    Si la columna C está vacía, indica que la fórmula fue borrada.
+    Si una celda NO tiene fórmula (fue borrada), genera una alerta.
+    Esto se cruza con Hoja 3: solo alerta si el caso tiene "SI" en el factor correspondiente.
     
-    Retorna: Lista de diccionarios con posibles fórmulas borradas
+    Retorna: Lista de diccionarios con fórmulas borradas detectadas
     """
     alertas = []
+    
+    # Si no tenemos la función para verificar fórmulas, no podemos hacer esta validación
+    if get_formula_func is None:
+        return alertas
     
     if not sheet_exists_func("3"):
         return alertas
@@ -244,9 +247,9 @@ def validar_formulas_borradas(get_cell_func, sheet_exists_func):
     
     COL_CASO_H3 = 2      # Columna B en Hoja 3
     COL_NRO_FACTOR = 2   # Columna B en hojas de factores
-    COL_C_FACTOR = 3     # Columna C en hojas de factores (donde está la fórmula)
+    COL_C_FACTOR = 3     # Columna C en hojas de factores (donde debería estar la fórmula)
     
-    # Construir diccionario de casos y su estado de columna C por cada hoja
+    # Construir diccionario de casos y verificar si tienen fórmula en columna C
     casos_info_por_hoja = {}
     for col_idx, config in MAPEO_FACTORES.items():
         hoja_factor = config["hoja"]
@@ -260,10 +263,11 @@ def validar_formulas_borradas(get_cell_func, sheet_exists_func):
             nro_caso_raw = get_cell_func(hoja_factor, fila, COL_NRO_FACTOR)
             nro_caso = normalizar_numero_caso(nro_caso_raw)
             if nro_caso and nro_caso != "0":
-                valor_col_c = get_cell_func(hoja_factor, fila, COL_C_FACTOR)
+                # Verificar si la columna C tiene fórmula
+                tiene_formula = get_formula_func(hoja_factor, fila, COL_C_FACTOR)
                 casos_info[nro_caso] = {
                     "fila": fila,
-                    "col_c_vacia": not valor_col_c or str(valor_col_c).strip() == ""
+                    "sin_formula": tiene_formula == False  # True si NO tiene fórmula
                 }
         casos_info_por_hoja[hoja_factor] = casos_info
     
@@ -279,22 +283,22 @@ def validar_formulas_borradas(get_cell_func, sheet_exists_func):
             valor_identificacion = get_cell_func("3", fila, col_idx)
             valor_upper = valor_identificacion.upper() if valor_identificacion else ""
             
-            # Si está marcado como "SI", verificar columna C
+            # Si está marcado como "SI", verificar si tiene fórmula en columna C
             if valor_upper in ["SI", "SÍ"]:
                 hoja_factor = config["hoja"]
                 casos_info = casos_info_por_hoja.get(hoja_factor, {})
                 
-                # Si el caso existe en la hoja pero columna C está vacía
+                # Si el caso existe en la hoja y NO tiene fórmula en columna C
                 if num_caso in casos_info:
                     info_caso = casos_info[num_caso]
-                    if info_caso["col_c_vacia"]:
+                    if info_caso["sin_formula"]:
                         alertas.append({
                             "caso": num_caso,
                             "fila_h3": fila,
                             "fila_factor": info_caso["fila"],
                             "factor": config["factor"],
                             "hoja": hoja_factor,
-                            "mensaje": f"Caso {num_caso}: Datos del puesto incompletos en Hoja {hoja_factor} (posible fórmula borrada)"
+                            "mensaje": f"Caso {num_caso}: Fórmula borrada en Hoja {hoja_factor} (columna C, fila {info_caso['fila']})"
                         })
     
     return alertas
@@ -576,6 +580,13 @@ def procesar_excel_resumen(uploaded_excel_file):
         traceback.print_exc()
         return None
     
+    # ===== CARGA ADICIONAL PARA DETECTAR FÓRMULAS =====
+    wb_formulas = None
+    try:
+        wb_formulas = load_workbook(BytesIO(file_content), data_only=False)
+    except Exception as e:
+        st.warning(f"⚠️ No se pudo cargar el archivo para detectar fórmulas: {e}")
+    
     # Definir funciones auxiliares según el método de carga usado
     if usar_pandas:
         # Usar pandas DataFrames para acceder a los datos
@@ -640,6 +651,22 @@ def procesar_excel_resumen(uploaded_excel_file):
         def sheet_exists(sheet_name):
             return sheet_name in wb.sheetnames
 
+    # Función para verificar si una celda tiene fórmula (usando wb_formulas)
+    def get_cell_has_formula(sheet_name, row, col):
+        """Verifica si una celda tiene fórmula (empieza con '=')"""
+        if wb_formulas is None:
+            return None  # No se puede determinar
+        try:
+            if sheet_name not in wb_formulas.sheetnames:
+                return None
+            hoja = wb_formulas[sheet_name]
+            valor = hoja.cell(row=row, column=col).value
+            if valor is None:
+                return False
+            return str(valor).startswith('=')
+        except:
+            return None
+
     resultado = {
         "informacion_general": {
             "razon_social": "",
@@ -677,7 +704,7 @@ def procesar_excel_resumen(uploaded_excel_file):
     
     # ===== VALIDACIÓN: FÓRMULAS BORRADAS EN HOJAS DE FACTORES =====
     try:
-        alertas_formulas = validar_formulas_borradas(get_cell_value, sheet_exists)
+        alertas_formulas = validar_formulas_borradas(get_cell_value, sheet_exists, get_cell_has_formula)
         resultado["alertas_validacion"]["formulas_borradas"] = alertas_formulas
     except Exception as e:
         st.warning(f"⚠️ Error al validar fórmulas borradas: {e}")
@@ -1100,10 +1127,11 @@ if uploaded_file:
             
             # Alerta 3: Fórmulas Borradas
             if alertas_formulas:
-                with st.expander(f"🔗 Datos del Puesto Incompletos: {len(alertas_formulas)} caso(s)", expanded=False):
-                    st.warning(f"Se encontraron **{len(alertas_formulas)}** casos con posibles fórmulas borradas.")
-                    st.markdown("**Problema:** El caso existe en la hoja de evaluación pero falta la información del puesto de trabajo (columna C vacía).")
-                    st.markdown("**Causa probable:** La fórmula que vincula los datos fue borrada accidentalmente.")
+                with st.expander(f"🔗 Fórmulas Borradas: {len(alertas_formulas)} caso(s)", expanded=True):
+                    st.error(f"Se detectaron **{len(alertas_formulas)}** fórmulas borradas en hojas de evaluación.")
+                    st.markdown("**Problema:** La celda de la columna C no tiene fórmula (debería tener una fórmula como `=Hoja1!XX`).")
+                    st.markdown("**Causa:** La fórmula fue borrada accidentalmente. Esto impide que los datos del puesto aparezcan en la evaluación.")
+                    st.markdown("**Solución:** Restaurar la fórmula en la celda indicada.")
                     
                     casos_por_mostrar = alertas_formulas[:50]
                     
@@ -1111,7 +1139,8 @@ if uploaded_file:
                         {
                             "Caso": alerta["caso"],
                             "Factor": alerta["factor"],
-                            "Hoja": alerta["hoja"]
+                            "Hoja": alerta["hoja"],
+                            "Fila": alerta.get("fila_factor", "")
                         }
                         for alerta in casos_por_mostrar
                     ])
