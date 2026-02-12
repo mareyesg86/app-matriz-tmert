@@ -1159,7 +1159,8 @@ if uploaded_file:
                         {
                             "Caso": alerta["caso"],
                             "Fila": alerta["fila"],
-                            "Columnas Faltantes": ", ".join(alerta["columnas_faltantes"])
+                            "Columnas Faltantes": ", ".join(alerta.get("columnas_faltantes", [])),
+                            "Mensaje": alerta.get("mensaje", "")
                         }
                         for alerta in casos_por_mostrar
                     ])
