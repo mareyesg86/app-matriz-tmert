@@ -108,58 +108,77 @@ def validar_identificacion_inicial(get_cell_func, sheet_exists_func, get_formula
         if es_caso_valido:
             num_caso = str(num_caso_raw).strip()
             
-            # --- 1. VALIDACIÓN DE FÓRMULAS BORRADAS (Columnas C y D) ---
+            # --- 1. VALIDACIÓN DE FÓRMULAS Y CONTENIDO (Columnas C y D) ---
+            problema_c = False
+            problema_d = False
+            
+            # Verificar Columna C (Área)
+            tiene_formula_c = None
             if get_formula_func:
-                # Verificar Columna C
                 tiene_formula_c = get_formula_func("3", fila, COL_C)
-                if tiene_formula_c is False: # False explícito significa "celda sin fórmula"
-                    alertas.append({
-                        "caso": num_caso,
-                        "fila": fila,
-                        "tipo": "formula_borrada",
-                        "mensaje": f"Caso {num_caso}: Fórmula borrada en Hoja 3, Columna C (Área)"
-                    })
-
-                # Verificar Columna D
-                tiene_formula_d = get_formula_func("3", fila, COL_D)
-                if tiene_formula_d is False:
-                    alertas.append({
-                        "caso": num_caso,
-                        "fila": fila,
-                        "tipo": "formula_borrada",
-                        "mensaje": f"Caso {num_caso}: Fórmula borrada en Hoja 3, Columna D (Puesto)"
-                    })
-
-            # --- 2. VALIDACIÓN DE DATOS INCOMPLETOS (SI/NO) ---
-            # Solo validamos datos si NO se detectó fórmula borrada (para no duplicar ruido),
-            # o si simplemente procedemos a chequear el contenido.
             
-            # Obtener valores de columnas C y D para ver si tienen "datos visuales"
             valor_c = get_cell_func("3", fila, COL_C)
-            valor_d = get_cell_func("3", fila, COL_D)
-            
-            # Si hay datos visibles en C o D (aunque falte fórmula, a veces pegan valores), exigimos SI/NO
-            tiene_datos_c = valor_c and valor_c != "0"
-            tiene_datos_d = valor_d and valor_d != "0"
-            
-            if tiene_datos_c or tiene_datos_d:
-                columnas_incompletas = []
-                for col_idx in COLS_EVALUAR:
-                    valor_col = get_cell_func("3", fila, col_idx).upper() if get_cell_func("3", fila, col_idx) else ""
-                    if valor_col not in VALORES_VALIDOS:
-                        # Convertir índice a letra de columna
-                        col_letra = chr(ord('A') + col_idx - 1)
-                        columnas_incompletas.append(col_letra)
+            tiene_contenido_c = valor_c and valor_c != "0"
+
+            if tiene_formula_c is False:
+                alertas.append({
+                    "caso": num_caso,
+                    "fila": fila,
+                    "tipo": "formula_borrada",
+                    "mensaje": f"Caso {num_caso}: Fórmula borrada en Hoja 3, Columna C (Área)"
+                })
+                problema_c = True
+            elif not tiene_contenido_c:
+                alertas.append({
+                    "caso": num_caso,
+                    "fila": fila,
+                    "tipo": "datos_incompletos", # Usamos este tipo para agruparlo
+                    "mensaje": f"Caso {num_caso}: Falta dato de Área en Columna C (Celda vacía)"
+                })
+                problema_c = True
+
+            # Verificar Columna D (Puesto)
+            tiene_formula_d = None
+            if get_formula_func:
+                tiene_formula_d = get_formula_func("3", fila, COL_D)
                 
-                # Si hay columnas sin completar, agregar alerta
-                if columnas_incompletas:
-                    alertas.append({
-                        "caso": num_caso,
-                        "fila": fila,
-                        "tipo": "datos_incompletos",
-                        "columnas_faltantes": columnas_incompletas,
-                        "mensaje": f"Caso {num_caso}: Falta completar identificación inicial (Columnas {', '.join(columnas_incompletas)})"
-                    })
+            valor_d = get_cell_func("3", fila, COL_D)
+            tiene_contenido_d = valor_d and valor_d != "0"
+
+            if tiene_formula_d is False:
+                alertas.append({
+                    "caso": num_caso,
+                    "fila": fila,
+                    "tipo": "formula_borrada",
+                    "mensaje": f"Caso {num_caso}: Fórmula borrada en Hoja 3, Columna D (Puesto)"
+                })
+                problema_d = True
+            elif not tiene_contenido_d:
+                alertas.append({
+                    "caso": num_caso,
+                    "fila": fila,
+                    "tipo": "datos_incompletos",
+                    "mensaje": f"Caso {num_caso}: Falta dato de Puesto en Columna D (Celda vacía)"
+                })
+                problema_d = True
+
+            # --- 2. VALIDACIÓN DE DATOS SI/NO (Columnas E-K) ---
+            # Validamos siempre que haya número de caso, independiente de si C/D tienen error
+            columnas_incompletas = []
+            for col_idx in COLS_EVALUAR:
+                valor_col = get_cell_func("3", fila, col_idx).upper() if get_cell_func("3", fila, col_idx) else ""
+                if valor_col not in VALORES_VALIDOS:
+                    col_letra = chr(ord('A') + col_idx - 1)
+                    columnas_incompletas.append(col_letra)
+            
+            if columnas_incompletas:
+                alertas.append({
+                    "caso": num_caso,
+                    "fila": fila,
+                    "tipo": "datos_incompletos",
+                    "columnas_faltantes": columnas_incompletas,
+                    "mensaje": f"Caso {num_caso}: Falta completar identificación inicial (Columnas {', '.join(columnas_incompletas)})"
+                })
     
     return alertas
 
