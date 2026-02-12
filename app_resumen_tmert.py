@@ -272,15 +272,13 @@ def validar_formulas_borradas(get_cell_func, sheet_exists_func, get_formula_func
     
     Detecta CUALQUIER fila donde:
     - La columna B tiene un número de caso (no vacío, no "0")
-    - La columna C NO tiene fórmula (fue borrada)
+    - Y ocurre uno de los siguientes:
+        a) Se detecta explícitamente que NO hay fórmula (si get_formula_func está disponible)
+        b) La celda está vacía visualmente (respaldo por si falla lectura de fórmulas)
     
     Retorna: Lista de diccionarios con fórmulas borradas detectadas
     """
     alertas = []
-    
-    # Si no tenemos la función para verificar fórmulas, no podemos hacer esta validación
-    if get_formula_func is None:
-        return alertas
     
     # Configuración de hojas de factores
     CONFIG_HOJAS = {
@@ -311,17 +309,35 @@ def validar_formulas_borradas(get_cell_func, sheet_exists_func, get_formula_func
             if not nro_caso or nro_caso == "0":
                 continue  # Fila sin caso, saltar
             
-            # Verificar si la columna C tiene fórmula
-            tiene_formula = get_formula_func(hoja_id, fila, COL_C)
+            problema_detectado = False
+            mensaje = ""
             
-            # Si tiene_formula es False (no None), significa que NO tiene fórmula
-            if tiene_formula == False:
+            # 1. Chequeo de Fórmula (Prioridad)
+            if get_formula_func:
+                tiene_formula = get_formula_func(hoja_id, fila, COL_C)
+                # Si es False explícito, seguro falta la fórmula
+                if tiene_formula is False:
+                    problema_detectado = True
+                    mensaje = f"Caso {nro_caso}: Fórmula borrada en Hoja {hoja_id}, columna C (Área)"
+            
+            # 2. Chequeo de Contenido (Respaldo)
+            # Si no se detectó problema de fórmula aún (o no se pudo chequear),
+            # verificamos si la celda está visualmente vacía.
+            if not problema_detectado:
+                valor_c = get_cell_func(hoja_id, fila, COL_C)
+                tiene_contenido = valor_c and valor_c != "0"
+                
+                if not tiene_contenido:
+                    problema_detectado = True
+                    mensaje = f"Caso {nro_caso}: Falta dato de Área en Hoja {hoja_id} (Celda vacía, posible fórmula borrada)"
+            
+            if problema_detectado:
                 alertas.append({
                     "caso": nro_caso,
                     "fila_factor": fila,
                     "factor": config["factor"],
                     "hoja": hoja_id,
-                    "mensaje": f"Caso {nro_caso}: Fórmula borrada en Hoja {hoja_id}, columna C, fila {fila}"
+                    "mensaje": mensaje
                 })
     
     return alertas
@@ -1180,9 +1196,10 @@ if uploaded_file:
                     
                     df_eval_pendientes = pd.DataFrame([
                         {
-                            "Caso": alerta["caso"],
-                            "Factor de Riesgo": alerta["factor"],
-                            "Hoja Faltante": alerta["hoja"]
+                            "Caso": alerta.get("caso", ""),
+                            "Factor de Riesgo": alerta.get("factor", ""),
+                            "Hoja Faltante": alerta.get("hoja", ""),
+                            "Mensaje": alerta.get("mensaje", "")
                         }
                         for alerta in casos_por_mostrar
                     ])
@@ -1195,19 +1212,20 @@ if uploaded_file:
             # Alerta 3: Fórmulas Borradas
             if alertas_formulas:
                 with st.expander(f"🔗 Fórmulas Borradas: {len(alertas_formulas)} caso(s)", expanded=True):
-                    st.error(f"Se detectaron **{len(alertas_formulas)}** fórmulas borradas en hojas de evaluación.")
-                    st.markdown("**Problema:** La celda de la columna C no tiene fórmula (debería tener una fórmula como `=Hoja1!XX`).")
+                    st.error(f"Se detectaron **{len(alertas_formulas)}** fórmulas borradas o datos faltantes en áreas vinculadas.")
+                    st.markdown("**Problema:** La celda de la columna C (Área) o D (Puesto) no tiene la fórmula de vínculo o está vacía.")
                     st.markdown("**Causa:** La fórmula fue borrada accidentalmente. Esto impide que los datos del puesto aparezcan en la evaluación.")
-                    st.markdown("**Solución:** Restaurar la fórmula en la celda indicada.")
+                    st.markdown("**Solución:** Restaurar la fórmula en la celda indicada (ej: `=Hoja1!XX`).")
                     
                     casos_por_mostrar = alertas_formulas[:50]
                     
                     df_formulas = pd.DataFrame([
                         {
-                            "Caso": alerta["caso"],
-                            "Factor": alerta["factor"],
-                            "Hoja": alerta["hoja"],
-                            "Fila": alerta.get("fila_factor", "")
+                            "Caso": alerta.get("caso", ""),
+                            "Factor": alerta.get("factor", ""),
+                            "Hoja": alerta.get("hoja", ""),
+                            "Fila": alerta.get("fila_factor", ""),
+                            "Mensaje": alerta.get("mensaje", "")
                         }
                         for alerta in casos_por_mostrar
                     ])
@@ -1229,10 +1247,11 @@ if uploaded_file:
                     
                     df_id_avanzada = pd.DataFrame([
                         {
-                            "Caso": alerta["caso"],
-                            "Factor": alerta["factor"],
-                            "Hoja": alerta["hoja"],
-                            "Problema": alerta["problema"]
+                            "Caso": alerta.get("caso", ""),
+                            "Factor": alerta.get("factor", ""),
+                            "Hoja": alerta.get("hoja", ""),
+                            "Problema": alerta.get("problema", ""),
+                            "Mensaje": alerta.get("mensaje", "")
                         }
                         for alerta in casos_por_mostrar
                     ])
