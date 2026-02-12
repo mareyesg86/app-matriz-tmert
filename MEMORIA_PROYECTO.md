@@ -289,6 +289,7 @@ streamlit run app_resumen_tmert.py
 | 10/02/2026 | Corregida fila de inicio de Repetitividad (16 en vez de 14) |
 | 10/02/2026 | Documentado flujo de datos y fórmulas de vinculación entre hojas |
 | 10/02/2026 | Agregada validación de fórmulas borradas (columna C vacía) |
+| 12/02/2026 | Mejorada validación en Hoja 3: detección de fórmulas borradas en Col C y D usando lectura de fórmulas real |
 
 ---
 

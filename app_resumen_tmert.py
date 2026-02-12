@@ -73,12 +73,13 @@ def normalizar_numero_caso(valor):
         return str(valor).strip()
 
 # --- Función para Validar Identificación Inicial (Hoja 3) ---
-def validar_identificacion_inicial(get_cell_func, sheet_exists_func):
+def validar_identificacion_inicial(get_cell_func, sheet_exists_func, get_formula_func=None):
     """
     Valida la Hoja "3" (Identificación Inicial).
     
-    Regla: Si las celdas C y D de una fila tienen datos (distintos de "0" y no vacías),
-    entonces las columnas E hasta K de esa fila deben contener "SI" o "NO".
+    Reglas:
+    1. Si hay un número de caso en Columna B, las columnas C y D deben tener fórmulas (vínculos).
+    2. Si las celdas C y D tienen datos, las columnas E hasta K deben contener "SI" o "NO".
     
     Retorna: Lista de diccionarios con casos que tienen problemas
     """
@@ -90,45 +91,75 @@ def validar_identificacion_inicial(get_cell_func, sheet_exists_func):
     
     # Columnas a verificar: B=2, C=3, D=4, E=5, F=6, G=7, H=8, I=9, J=10, K=11
     COL_CASO = 2      # B - Número de caso
-    COL_C = 3         # C
-    COL_D = 4         # D
+    COL_C = 3         # C - Área (debe tener fórmula)
+    COL_D = 4         # D - Puesto (debe tener fórmula)
     COLS_EVALUAR = [5, 6, 7, 8, 9, 10, 11]  # E, F, G, H, I, J, K
     
     VALORES_VALIDOS = ["SI", "NO", "SÍ"]  # Valores aceptados (incluyendo "SÍ" con acento)
     
     # Recorrer filas 14 a 3013
     for fila in range(14, 3014):
-        # Obtener valores de columnas C y D
-        valor_c = get_cell_func("3", fila, COL_C)
-        valor_d = get_cell_func("3", fila, COL_D)
+        # Obtener número de caso
+        num_caso_raw = get_cell_func("3", fila, COL_CASO)
+        # Normalizar para verificar si es un caso válido (no vacío, no "0")
+        # Usamos una verificación simple aquí ya que B suele ser fijo "1", "2", etc.
+        es_caso_valido = num_caso_raw and str(num_caso_raw).strip() not in ["", "0", "None"]
         
-        # Verificar si C o D tienen datos (distintos de "0" y no vacías)
-        tiene_datos_c = valor_c and valor_c != "0"
-        tiene_datos_d = valor_d and valor_d != "0"
-        
-        if tiene_datos_c or tiene_datos_d:
-            # Obtener número de caso
-            num_caso = get_cell_func("3", fila, COL_CASO)
-            if not num_caso:
-                num_caso = f"Fila {fila}"
+        if es_caso_valido:
+            num_caso = str(num_caso_raw).strip()
             
-            # Verificar que columnas E-K tengan "SI" o "NO"
-            columnas_incompletas = []
-            for col_idx in COLS_EVALUAR:
-                valor_col = get_cell_func("3", fila, col_idx).upper() if get_cell_func("3", fila, col_idx) else ""
-                if valor_col not in VALORES_VALIDOS:
-                    # Convertir índice a letra de columna
-                    col_letra = chr(ord('A') + col_idx - 1)
-                    columnas_incompletas.append(col_letra)
+            # --- 1. VALIDACIÓN DE FÓRMULAS BORRADAS (Columnas C y D) ---
+            if get_formula_func:
+                # Verificar Columna C
+                tiene_formula_c = get_formula_func("3", fila, COL_C)
+                if tiene_formula_c is False: # False explícito significa "celda sin fórmula"
+                    alertas.append({
+                        "caso": num_caso,
+                        "fila": fila,
+                        "tipo": "formula_borrada",
+                        "mensaje": f"Caso {num_caso}: Fórmula borrada en Hoja 3, Columna C (Área)"
+                    })
+
+                # Verificar Columna D
+                tiene_formula_d = get_formula_func("3", fila, COL_D)
+                if tiene_formula_d is False:
+                    alertas.append({
+                        "caso": num_caso,
+                        "fila": fila,
+                        "tipo": "formula_borrada",
+                        "mensaje": f"Caso {num_caso}: Fórmula borrada en Hoja 3, Columna D (Puesto)"
+                    })
+
+            # --- 2. VALIDACIÓN DE DATOS INCOMPLETOS (SI/NO) ---
+            # Solo validamos datos si NO se detectó fórmula borrada (para no duplicar ruido),
+            # o si simplemente procedemos a chequear el contenido.
             
-            # Si hay columnas sin completar, agregar alerta
-            if columnas_incompletas:
-                alertas.append({
-                    "caso": num_caso,
-                    "fila": fila,
-                    "columnas_faltantes": columnas_incompletas,
-                    "mensaje": f"Caso {num_caso}: Falta completar identificación inicial"
-                })
+            # Obtener valores de columnas C y D para ver si tienen "datos visuales"
+            valor_c = get_cell_func("3", fila, COL_C)
+            valor_d = get_cell_func("3", fila, COL_D)
+            
+            # Si hay datos visibles en C o D (aunque falte fórmula, a veces pegan valores), exigimos SI/NO
+            tiene_datos_c = valor_c and valor_c != "0"
+            tiene_datos_d = valor_d and valor_d != "0"
+            
+            if tiene_datos_c or tiene_datos_d:
+                columnas_incompletas = []
+                for col_idx in COLS_EVALUAR:
+                    valor_col = get_cell_func("3", fila, col_idx).upper() if get_cell_func("3", fila, col_idx) else ""
+                    if valor_col not in VALORES_VALIDOS:
+                        # Convertir índice a letra de columna
+                        col_letra = chr(ord('A') + col_idx - 1)
+                        columnas_incompletas.append(col_letra)
+                
+                # Si hay columnas sin completar, agregar alerta
+                if columnas_incompletas:
+                    alertas.append({
+                        "caso": num_caso,
+                        "fila": fila,
+                        "tipo": "datos_incompletos",
+                        "columnas_faltantes": columnas_incompletas,
+                        "mensaje": f"Caso {num_caso}: Falta completar identificación inicial (Columnas {', '.join(columnas_incompletas)})"
+                    })
     
     return alertas
 
@@ -677,8 +708,29 @@ def procesar_excel_resumen(uploaded_excel_file):
     
     # ===== VALIDACIÓN HOJA 3: IDENTIFICACIÓN INICIAL =====
     try:
-        alertas_id_inicial = validar_identificacion_inicial(get_cell_value, sheet_exists)
-        resultado["alertas_validacion"]["identificacion_inicial"] = alertas_id_inicial
+        # Pasamos get_cell_has_formula para verificar si existen los vínculos
+        alertas_id_inicial_raw = validar_identificacion_inicial(get_cell_value, sheet_exists, get_cell_has_formula)
+        
+        # Separar alertas por tipo para mejor visualización
+        formulas_borradas_h3 = [a for a in alertas_id_inicial_raw if a.get("tipo") == "formula_borrada"]
+        datos_incompletos_h3 = [a for a in alertas_id_inicial_raw if a.get("tipo") == "datos_incompletos"]
+        
+        resultado["alertas_validacion"]["identificacion_inicial"] = datos_incompletos_h3
+        
+        # Si ya existe la lista de fórmulas borradas (de otras hojas), la extendemos
+        if "formulas_borradas" not in resultado["alertas_validacion"]:
+            resultado["alertas_validacion"]["formulas_borradas"] = []
+            
+        # Adaptar formato de alertas de H3 al formato general de fórmulas borradas
+        for alerta in formulas_borradas_h3:
+            resultado["alertas_validacion"]["formulas_borradas"].append({
+                "caso": alerta["caso"],
+                "fila_factor": alerta["fila"],
+                "factor": "Identificación Inicial",
+                "hoja": "3",
+                "mensaje": alerta["mensaje"]
+            })
+            
     except Exception as e:
         st.warning(f"⚠️ Error al validar identificación inicial: {e}")
     
@@ -691,8 +743,16 @@ def procesar_excel_resumen(uploaded_excel_file):
     
     # ===== VALIDACIÓN: FÓRMULAS BORRADAS EN HOJAS DE FACTORES =====
     try:
-        alertas_formulas = validar_formulas_borradas(get_cell_value, sheet_exists, get_cell_has_formula)
-        resultado["alertas_validacion"]["formulas_borradas"] = alertas_formulas
+        # Validar en hojas 4-10
+        alertas_formulas_factores = validar_formulas_borradas(get_cell_value, sheet_exists, get_cell_has_formula)
+        
+        # Inicializar lista si no existe (puede haber sido creada en la validación de Hoja 3)
+        if "formulas_borradas" not in resultado["alertas_validacion"]:
+             resultado["alertas_validacion"]["formulas_borradas"] = []
+             
+        # Agregar las nuevas alertas
+        resultado["alertas_validacion"]["formulas_borradas"].extend(alertas_formulas_factores)
+        
     except Exception as e:
         st.warning(f"⚠️ Error al validar fórmulas borradas: {e}")
     
